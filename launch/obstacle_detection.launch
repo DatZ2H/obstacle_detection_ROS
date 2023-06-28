@@ -1,0 +1,3 @@
+<launch>
+  <node pkg="obstacle_detection" type="obstacle_detection" name="obstacle_detection_node" output="screen"/>
+</launch>
