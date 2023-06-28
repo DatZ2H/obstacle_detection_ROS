@@ -5,13 +5,17 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   sensor_msgs
   pcl_ros
-  tf
+  tf2
+  tf2_ros
 )
 
 catkin_package()
 
 include_directories(
   ${catkin_INCLUDE_DIRS}
+  ${pcl_ros_INCLUDE_DIRS}
+  ${tf2_INCLUDE_DIRS}
+  ${tf2_ros_INCLUDE_DIRS}
 )
 
 add_executable(obstacle_detection src/obstacle_detection.cpp)

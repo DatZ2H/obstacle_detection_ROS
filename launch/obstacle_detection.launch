@@ -151,4 +151,5 @@
     </include>
   </group>
   <node pkg="obstacle_detection" type="obstacle_detection" name="obstacle_detection_node" output="screen"/>
+  <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="camera_base_tf" args="0 0 0 0 -1.5708 0 base_link camera_link" /> -->
 </launch>
