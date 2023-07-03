@@ -75,7 +75,7 @@ private:
     pcl::PassThrough<pcl::PointXYZ> pass;
     pass.setInputCloud(input_cloud);
     pass.setFilterFieldName("z");
-    pass.setFilterLimits(0.0, 2.0);
+    pass.setFilterLimits(0.0, 3.0);
     pass.filter(*filtered_cloud);
   }
 
@@ -133,7 +133,7 @@ void removeFloor(const pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud,
     std::vector<pcl::PointIndices> cluster_indices;
     pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
     ec.setClusterTolerance(0.02);
-    ec.setMinClusterSize(100);
+    ec.setMinClusterSize(1000);
     ec.setMaxClusterSize(25000);
     ec.setSearchMethod(tree);
     ec.setInputCloud(input_cloud);
