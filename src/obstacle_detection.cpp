@@ -13,7 +13,6 @@
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <std_msgs/String.h>
-
 #include <pcl/point_cloud.h>
 
 
@@ -98,7 +97,7 @@ public:
     safety_status_pub_.publish(safety_status_msg);
 
     // Gửi kết quả xử lý của PCL qua topic output_point_cloud_topic
-    output_pub_.publish(convertToPointCloud2(clusters[0]));
+   // output_pub_.publish(convertToPointCloud2(clusters[0]));
   }
 
   void passThroughFilter(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud_in,
