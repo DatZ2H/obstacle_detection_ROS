@@ -175,7 +175,7 @@ public:
   {
     pcl::PassThrough<pcl::PointXYZ> pass;
     pass.setInputCloud(cloud_in);
-    pass.setFilterFieldName("x");
+    pass.setFilterFieldName("z");
     pass.setFilterLimits(safety_warn_position_(0) - safety_warn_size_ / 2,
                          safety_warn_position_(0) + safety_warn_size_ / 2);
     pass.filter(*safety_warn_cloud);
