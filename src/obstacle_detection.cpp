@@ -234,13 +234,14 @@ public:
                            std_msgs::String &safety_status_msg)
   {
     int num_obstacles = cloud_in->size();
+       ROS_INFO("num_obstacles=========:%i",num_obstacles);
     if (num_obstacles > 0)
     {
-      if (num_obstacles > collision_detection_limit_)
-      {
-        safety_status_msg.data = "Collision";
-        return;
-      }
+      // if (num_obstacles > collision_detection_limit_)
+      // {
+      //   safety_status_msg.data = "Collision";
+      //   return;
+      // }
 
       // Kiểm tra xem các điểm trong vùng an toàn có nằm trong vùng cảnh báo hay vùng bảo vệ không
       int num_warn_points = 0;
@@ -263,11 +264,11 @@ public:
         }
       }
 
-      if (num_protect_points > 0)
+      if (num_protect_points > 1000)
       {
         safety_status_msg.data = "Protect";
       }
-      else if (num_warn_points > 0)
+      else if (num_warn_points > 1000)
       {
         safety_status_msg.data = "Warn";
       }
