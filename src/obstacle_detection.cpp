@@ -44,6 +44,8 @@ public:
     // Đọc các tham số từ file launch hoặc sử dụng giá trị mặc định
     nh_.param<double>("pass_through_z_min", pass_through_z_min_, 0.0);
     nh_.param<double>("pass_through_z_max", pass_through_z_max_, 2.0);
+    nh_.param<double>("pass_through_y_min", pass_through_y_min_, -1.0);
+    nh_.param<double>("pass_through_y_max", pass_through_y_max_, 1.0);
     nh_.param<double>("voxel_leaf_size", voxel_leaf_size_, 0.01);
     nh_.param<double>("ground_seg_distance_threshold", ground_seg_distance_threshold_, 0.01);
     nh_.param<double>("cluster_tolerance", cluster_tolerance_, 0.02);
@@ -58,8 +60,10 @@ public:
     nh_.param<double>("safety_protect_position_y", safety_protect_position_(1), 0.0);
     nh_.param<double>("safety_protect_position_z", safety_protect_position_(2), 1.0);
     nh_.param<double>("collision_threshold", collision_threshold_, 0.1);
-    nh_.param<int>("collision_detection_limit", collision_detection_limit_, 5);
-    collision_counter_.resize(collision_detection_limit_, 0);
+    nh_.param<int>("min_cluster_warn_size", min_cluster_warn_size_, 10);
+    nh_.param<int>("min_cluster_protect_size", min_cluster_protect_size_, 10);
+    nh_.param<int>("consecutive_warn_count", min_consecutive_warn_count_, 5);
+    nh_.param<int>("consecutive_protect_count", min_consecutive_protect_count_, 5);
 
     displayParameters();
   }
@@ -94,7 +98,6 @@ public:
 
     // Kiểm tra vùng an toàn
     // Tạo cloud chứa các cụm vật thể
-    pcl::PointCloud<pcl::PointXYZ>::Ptr obstacles_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::PointCloud<pcl::PointXYZ>::Ptr safety_warn_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::PointCloud<pcl::PointXYZ>::Ptr safety_protect_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     computeSafetyZone(ground_removed_cloud, safety_warn_cloud, safety_protect_cloud);
@@ -105,7 +108,7 @@ public:
 
     // Tính toán trạng thái an toàn
     std_msgs::String safety_status_msg;
-    computeSafetyStatus(ground_removed_cloud, safety_warn_cloud, safety_protect_cloud, safety_status_msg);
+    safety_status_msg.data = computeSafetyStatus(ground_removed_cloud, safety_warn_cloud, safety_protect_cloud);
 
     // Publish trạng thái an toàn
     safety_status_pub_.publish(safety_status_msg);
@@ -119,8 +122,15 @@ public:
   {
     pcl::PassThrough<pcl::PointXYZ> pass;
     pass.setInputCloud(cloud_in);
+
+    // Filter along the z-axis
     pass.setFilterFieldName("z");
     pass.setFilterLimits(pass_through_z_min_, pass_through_z_max_);
+    pass.filter(*cloud_out);
+
+    // Filter along the y-axis
+    pass.setFilterFieldName("y");
+    pass.setFilterLimits(pass_through_y_min_, pass_through_y_max_);
     pass.filter(*cloud_out);
   }
 
@@ -136,18 +146,20 @@ public:
   void segmentGround(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
                      pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_out)
   {
+    // Set the segmentation parameters
     pcl::SACSegmentation<pcl::PointXYZ> seg;
     seg.setOptimizeCoefficients(true);
     seg.setModelType(pcl::SACMODEL_PLANE);
     seg.setMethodType(pcl::SAC_RANSAC);
     seg.setDistanceThreshold(ground_seg_distance_threshold_);
+     seg.setMaxIterations(100);
 
     pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
     pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
-
+    // Set the segmentation parameters
     seg.setInputCloud(cloud_in);
     seg.segment(*inliers, *coefficients);
-
+    // Extract the ground points
     pcl::ExtractIndices<pcl::PointXYZ> extract;
     extract.setInputCloud(cloud_in);
     extract.setIndices(inliers);
@@ -228,59 +240,58 @@ public:
     pass.filter(*safety_protect_cloud);
   }
 
-  void computeSafetyStatus(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
-                           pcl::PointCloud<pcl::PointXYZ>::Ptr &safety_warn_cloud,
-                           pcl::PointCloud<pcl::PointXYZ>::Ptr &safety_protect_cloud,
-                           std_msgs::String &safety_status_msg)
+  std::string computeSafetyStatus(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
+                                  pcl::PointCloud<pcl::PointXYZ>::Ptr &safety_warn_cloud,
+                                  pcl::PointCloud<pcl::PointXYZ>::Ptr &safety_protect_cloud)
   {
-    int num_obstacles = cloud_in->size();
-       ROS_INFO("num_obstacles=========:%i",num_obstacles);
-    if (num_obstacles > 0)
+
+    int num_warn = safety_warn_cloud->size();
+    int num_protect = safety_protect_cloud->size();
+
+    // static int consecutive_warn_count = 0;
+    // static int consecutive_protect_count = 0;
+
+    std::string status = "Safe";
+      if (num_warn >= min_cluster_warn_size_)
     {
-      // if (num_obstacles > collision_detection_limit_)
-      // {
-      //   safety_status_msg.data = "Collision";
-      //   return;
-      // }
 
-      // Kiểm tra xem các điểm trong vùng an toàn có nằm trong vùng cảnh báo hay vùng bảo vệ không
-      int num_warn_points = 0;
-      int num_protect_points = 0;
-      for (const auto &point : safety_warn_cloud->points)
-      {
-        if (point.z >= safety_warn_position_(2) - safety_warn_size_ / 2 &&
-            point.z <= safety_warn_position_(2) + safety_warn_size_ / 2)
-        {
-          num_warn_points++;
-        }
-      }
+      consecutive_warn_count++;
+      // consecutive_protect_count = 0;
 
-      for (const auto &point : safety_protect_cloud->points)
+      if (consecutive_warn_count >= min_consecutive_warn_count_)
       {
-        if (point.z >= safety_protect_position_(2) - safety_protect_size_ / 2 &&
-            point.z <= safety_protect_position_(2) + safety_protect_size_ / 2)
-        {
-          num_protect_points++;
-        }
-      }
-
-      if (num_protect_points > 1000)
-      {
-        safety_status_msg.data = "Protect";
-      }
-      else if (num_warn_points > 1000)
-      {
-        safety_status_msg.data = "Warn";
-      }
-      else
-      {
-        safety_status_msg.data = "Safe";
+        // ROS_WARN_STREAM("Safety zone breached! Proceed with caution.");
+        status = "Warning";
       }
     }
     else
     {
-      safety_status_msg.data = "Safe";
+      consecutive_warn_count = 0;
     }
+
+    if (num_protect >= min_cluster_protect_size_)
+    {
+
+      consecutive_protect_count++;
+      // consecutive_warn_count = 0;
+
+      if (consecutive_protect_count >= min_consecutive_protect_count_)
+      {
+        //  ROS_WARN_STREAM("Safety zone breached! Take immediate action!");
+        status = "Protected";
+      }
+    }
+    else
+    {
+      consecutive_protect_count = 0;
+    }
+  
+
+      
+    
+
+
+    return status;
   }
 
   sensor_msgs::PointCloud2 convertToPointCloud2(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud)
@@ -305,7 +316,10 @@ private:
 
   double pass_through_z_min_;
   double pass_through_z_max_;
+  double pass_through_y_min_;
+  double pass_through_y_max_;
   double voxel_leaf_size_;
+
   double ground_seg_distance_threshold_;
   double cluster_tolerance_;
   int min_cluster_size_;
@@ -317,6 +331,13 @@ private:
   Eigen::Vector3d safety_protect_position_;
   double safety_protect_size_;
   std::vector<int> collision_counter_;
+  int min_cluster_warn_size_;
+  int min_cluster_protect_size_;
+  int min_consecutive_warn_count_;
+  int min_consecutive_protect_count_;
+  int consecutive_warn_count = 0;
+  int consecutive_protect_count = 0;
+
   void displayParameters()
   {
     ROS_INFO("Obstacle Detection Parameters:");
