@@ -14,7 +14,7 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <std_msgs/String.h>
 #include <pcl/point_cloud.h>
-
+#include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/ModelCoefficients.h>
 #include <pcl/common/centroid.h>
@@ -22,6 +22,8 @@
 #include <pcl/common/transforms.h>
 #include <pcl/console/parse.h>
 #include <string>
+#include <pcl/filters/conditional_removal.h>
+#include <pcl/common/distances.h>
 
 class ObstacleDetection
 {
@@ -31,6 +33,7 @@ public:
     // Đăng ký các publisher
     filtered_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("filtered_publisher", 1);
     downsampled_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("downsampled_publisher", 1);
+    denoised_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("denoised_publisher", 1);
     obstacles_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("obstacles_publisher", 1);
     clustered_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("clustered_publisher", 1);
     output_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("output_point_cloud_topic", 1);
@@ -43,23 +46,28 @@ public:
 
     // Đọc các tham số từ file launch hoặc sử dụng giá trị mặc định
     nh_.param<double>("pass_through_z_min", pass_through_z_min_, 0.0);
-    nh_.param<double>("pass_through_z_max", pass_through_z_max_, 2.0);
+    nh_.param<double>("pass_through_z_max", pass_through_z_max_, 3.0);
     nh_.param<double>("pass_through_y_min", pass_through_y_min_, -1.0);
     nh_.param<double>("pass_through_y_max", pass_through_y_max_, 1.0);
+
     nh_.param<double>("voxel_leaf_size", voxel_leaf_size_, 0.01);
-    nh_.param<double>("ground_seg_distance_threshold", ground_seg_distance_threshold_, 0.01);
+
+    nh_.param<int>("ground_seg_max_iterations", ground_seg_max_iterations_, 50);
+    nh_.param<double>("ground_seg_distance_threshold", ground_seg_distance_threshold_, 0.05);
+
     nh_.param<double>("cluster_tolerance", cluster_tolerance_, 0.02);
     nh_.param<int>("min_cluster_size", min_cluster_size_, 100);
     nh_.param<int>("max_cluster_size", max_cluster_size_, 25000);
-    nh_.param<double>("safety_warn_size", safety_warn_size_, 0.1);
-    nh_.param<double>("safety_protect_size", safety_protect_size_, 0.2);
+
+    nh_.param<double>("safety_warn_size", safety_warn_size_, 1.0);
+    nh_.param<double>("safety_protect_size", safety_protect_size_, 0.5);
     nh_.param<double>("safety_warn_position_x", safety_warn_position_(0), 0.0);
     nh_.param<double>("safety_warn_position_y", safety_warn_position_(1), 0.0);
     nh_.param<double>("safety_warn_position_z", safety_warn_position_(2), 1.0);
     nh_.param<double>("safety_protect_position_x", safety_protect_position_(0), 0.0);
     nh_.param<double>("safety_protect_position_y", safety_protect_position_(1), 0.0);
     nh_.param<double>("safety_protect_position_z", safety_protect_position_(2), 1.0);
-    nh_.param<double>("collision_threshold", collision_threshold_, 0.1);
+
     nh_.param<int>("min_cluster_warn_size", min_cluster_warn_size_, 10);
     nh_.param<int>("min_cluster_protect_size", min_cluster_protect_size_, 10);
     nh_.param<int>("consecutive_warn_count", min_consecutive_warn_count_, 5);
@@ -82,6 +90,10 @@ public:
     pcl::PointCloud<pcl::PointXYZ>::Ptr downsampled_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     voxelGridFilter(filtered_cloud, downsampled_cloud);
 
+    // Apply StatisticalOutlierRemoval filter to remove outliers
+    // pcl::PointCloud<pcl::PointXYZ>::Ptr denoised_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    // statisticalOutlierRemoval(downsampled_cloud, denoised_cloud);
+
     // Áp dụng Ground segmentation algorithm để loại bỏ sàn nhà
     pcl::PointCloud<pcl::PointXYZ>::Ptr ground_removed_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     segmentGround(downsampled_cloud, ground_removed_cloud);
@@ -90,11 +102,12 @@ public:
     std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> clusters;
     euclideanClustering(ground_removed_cloud, clusters);
 
-    // Xuất kết quả các bước xử lý qua các topic tương ứng
-    filtered_pub_.publish(convertToPointCloud2(filtered_cloud));
-    downsampled_pub_.publish(convertToPointCloud2(downsampled_cloud));
-    obstacles_pub_.publish(convertToPointCloud2(ground_removed_cloud));
-    clustered_pub_.publish(convertToPointCloud2(clusters[0]));
+    // // Xuất kết quả các bước xử lý qua các topic tương ứng
+    // filtered_pub_.publish(convertToPointCloud2(filtered_cloud));
+    // downsampled_pub_.publish(convertToPointCloud2(downsampled_cloud));
+    // denoised_pub_.publish(convertToPointCloud2(denoised_cloud));
+    // obstacles_pub_.publish(convertToPointCloud2(ground_removed_cloud));
+    // clustered_pub_.publish(convertToPointCloud2(clusters[0]));
 
     // Kiểm tra vùng an toàn
     // Tạo cloud chứa các cụm vật thể
@@ -132,6 +145,8 @@ public:
     pass.setFilterFieldName("y");
     pass.setFilterLimits(pass_through_y_min_, pass_through_y_max_);
     pass.filter(*cloud_out);
+    // Xuất kết quả các bước xử lý qua các topic tương ứng
+    filtered_pub_.publish(convertToPointCloud2(cloud_out));
   }
 
   void voxelGridFilter(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
@@ -141,6 +156,20 @@ public:
     voxel_grid.setInputCloud(cloud_in);
     voxel_grid.setLeafSize(voxel_leaf_size_, voxel_leaf_size_, voxel_leaf_size_);
     voxel_grid.filter(*cloud_out);
+    // Xuất kết quả các bước xử lý qua các topic tương ứng
+    downsampled_pub_.publish(convertToPointCloud2(cloud_out));
+  }
+  void statisticalOutlierRemoval(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
+                                 pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_out)
+  {
+    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+    sor.setInputCloud(cloud_in);
+    sor.setMeanK(50);            // Number of nearest neighbors to compute mean distance
+    sor.setStddevMulThresh(1.0); // Standard deviation multiplier threshold
+    sor.filter(*cloud_out);
+    // Xuất kết quả các bước xử lý qua các topic tương ứng
+
+    denoised_pub_.publish(convertToPointCloud2(cloud_out));
   }
 
   void segmentGround(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
@@ -151,24 +180,41 @@ public:
     seg.setOptimizeCoefficients(true);
     seg.setModelType(pcl::SACMODEL_PLANE);
     seg.setMethodType(pcl::SAC_RANSAC);
+    seg.setMaxIterations(ground_seg_max_iterations_);
     seg.setDistanceThreshold(ground_seg_distance_threshold_);
-     seg.setMaxIterations(100);
 
     pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
-    pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+    pcl::PointIndices::Ptr ground_indices(new pcl::PointIndices);
+
     // Set the segmentation parameters
     seg.setInputCloud(cloud_in);
-    seg.segment(*inliers, *coefficients);
-    // Extract the ground points
-    pcl::ExtractIndices<pcl::PointXYZ> extract;
-    extract.setInputCloud(cloud_in);
-    extract.setIndices(inliers);
-    extract.setNegative(true);
-    extract.filter(*cloud_out);
+    seg.segment(*ground_indices, *coefficients);
+
+    if (!ground_indices->indices.empty())
+    {
+      // Extract the ground points
+      pcl::ExtractIndices<pcl::PointXYZ> extract;
+      extract.setInputCloud(cloud_in);
+      extract.setIndices(ground_indices);
+      extract.setNegative(true);
+      extract.filter(*cloud_out);
+    }
+    //     for (const auto& point : *cloud_in)
+    // {
+    //     float distance = coefficients->values[0] * point.x +
+    //                      coefficients->values[1] * point.y +
+    //                      coefficients->values[2] * point.z +
+    //                      coefficients->values[3];
+    //     if (distance > 0.05) // Adjust the threshold according to your environment
+    //         cloud_out->push_back(point);
+    // }
+    // Xuất kết quả các bước xử lý qua các topic tương ứng
+
+    obstacles_pub_.publish(convertToPointCloud2(cloud_out));
   }
 
   void euclideanClustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
-                           std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> &clusters)
+                           std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> &cloud_out)
   {
     // Phân nhóm các điểm dữ liệu thành các cụm
     pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
@@ -193,9 +239,11 @@ public:
       cluster->width = cluster->points.size();
       cluster->height = 1;
       cluster->is_dense = true;
-      clusters.push_back(cluster);
+      cloud_out.push_back(cluster);
     }
     cluster_label++;
+
+    clustered_pub_.publish(convertToPointCloud2(cloud_out[0]));
   }
 
   void computeSafetyZone(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
@@ -239,6 +287,14 @@ public:
     pass.setInputCloud(filtered_protect_cloud);
     pass.filter(*safety_protect_cloud);
   }
+  float calculateDistance(const pcl::PointXYZ &point)
+  {
+    float dx = point.x;
+    float dy = point.y;
+    float dz = point.z;
+
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+  }
 
   std::string computeSafetyStatus(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
                                   pcl::PointCloud<pcl::PointXYZ>::Ptr &safety_warn_cloud,
@@ -252,7 +308,7 @@ public:
     // static int consecutive_protect_count = 0;
 
     std::string status = "Safe";
-      if (num_warn >= min_cluster_warn_size_)
+    if (num_warn >= min_cluster_warn_size_)
     {
 
       consecutive_warn_count++;
@@ -285,11 +341,6 @@ public:
     {
       consecutive_protect_count = 0;
     }
-  
-
-      
-    
-
 
     return status;
   }
@@ -307,6 +358,7 @@ private:
   ros::Subscriber cloud_sub_;
   ros::Publisher filtered_pub_;
   ros::Publisher downsampled_pub_;
+  ros::Publisher denoised_pub_;
   ros::Publisher obstacles_pub_;
   ros::Publisher clustered_pub_;
   ros::Publisher output_pub_;
@@ -318,19 +370,21 @@ private:
   double pass_through_z_max_;
   double pass_through_y_min_;
   double pass_through_y_max_;
+
   double voxel_leaf_size_;
 
+  int ground_seg_max_iterations_;
   double ground_seg_distance_threshold_;
+
   double cluster_tolerance_;
   int min_cluster_size_;
   int max_cluster_size_;
-  double collision_threshold_;
-  int collision_detection_limit_;
-  Eigen::Vector3d safety_warn_position_;
+
   double safety_warn_size_;
-  Eigen::Vector3d safety_protect_position_;
   double safety_protect_size_;
-  std::vector<int> collision_counter_;
+  Eigen::Vector3d safety_warn_position_;
+  Eigen::Vector3d safety_protect_position_;
+  
   int min_cluster_warn_size_;
   int min_cluster_protect_size_;
   int min_consecutive_warn_count_;
