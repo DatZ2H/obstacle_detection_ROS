@@ -78,12 +78,12 @@
    <!-- Khai báo các tham số -->
   <arg name="pass_through_z_min" default="0.0" />
   <arg name="pass_through_z_max" default="3.0" />
-  <arg name="pass_through_y_min" default="0.0" />
-  <arg name="pass_through_y_max" default="3.0" />
+  <arg name="pass_through_y_min" default="-1.5" />
+  <arg name="pass_through_y_max" default="0.25" />
 
   <arg name="voxel_leaf_size" default="0.01" />
 
-  <arg name="ground_seg_max_iterations" default="50" />
+  <arg name="ground_seg_max_iterations" default="1" />
   <arg name="ground_seg_distance_threshold" default="0.01" />
 
   <arg name="cluster_tolerance" default="0.02" />
@@ -210,5 +210,6 @@
     <param name="consecutive_protect_count" value="$(arg consecutive_protect_count)" />
 
   </node>
-  <node pkg="tf2_ros" type="static_transform_publisher" name="camera_base_tf" args="0 0 0 1.5708 -1.5708 0 base_link camera_link" />
+  <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="camera_base_tf" args="0.551 0 0.2 1.5708 -1.5708 0 base_link camera_link" /> -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="camera_base_tf" args="0.551 0 0.3 -1.5708 0 -1.5708 base_link camera_link" />
 </launch>

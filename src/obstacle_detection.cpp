@@ -24,6 +24,8 @@
 #include <string>
 #include <pcl/filters/conditional_removal.h>
 #include <pcl/common/distances.h>
+#include <pcl/filters/conditional_removal.h>
+#include <pcl/filters/radius_outlier_removal.h>
 
 class ObstacleDetection
 {
@@ -73,6 +75,11 @@ public:
     nh_.param<int>("consecutive_warn_count", min_consecutive_warn_count_, 5);
     nh_.param<int>("consecutive_protect_count", min_consecutive_protect_count_, 5);
 
+    nh_.param("condition_min_z", condition_min_z_, 0.0);
+    nh_.param("condition_max_z", condition_max_z_, 2.0);
+    nh_.param("radius_search", radius_search_, 0.1);
+    nh_.param("min_neighbors_in_radius", min_neighbors_in_radius_, 5);
+
     displayParameters();
   }
 
@@ -90,17 +97,28 @@ public:
     pcl::PointCloud<pcl::PointXYZ>::Ptr downsampled_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     voxelGridFilter(filtered_cloud, downsampled_cloud);
 
+    // Remove outliers using Conditional Outlier Removal
+    // pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_outliers_removed(new pcl::PointCloud<pcl::PointXYZ>);
+    // conditionalOutlierRemoval(downsampled_cloud, cloud_outliers_removed);
+
+    // Remove outliers using Radius Outlier Removal
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_outliers_removed2(new pcl::PointCloud<pcl::PointXYZ>);
+    radiusOutlierRemoval(downsampled_cloud, cloud_outliers_removed2);
+
+    //obstacles_pub_.publish(convertToPointCloud2(cloud_outliers_removed));
+    clustered_pub_.publish(convertToPointCloud2(cloud_outliers_removed2));
+
     // Apply StatisticalOutlierRemoval filter to remove outliers
     // pcl::PointCloud<pcl::PointXYZ>::Ptr denoised_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     // statisticalOutlierRemoval(downsampled_cloud, denoised_cloud);
 
     // Áp dụng Ground segmentation algorithm để loại bỏ sàn nhà
-    pcl::PointCloud<pcl::PointXYZ>::Ptr ground_removed_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    segmentGround(downsampled_cloud, ground_removed_cloud);
+    // pcl::PointCloud<pcl::PointXYZ>::Ptr ground_removed_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    // segmentGround(downsampled_cloud, ground_removed_cloud);
 
     // Phân nhóm các điểm dữ liệu thành các cụm sử dụng Euclidean clustering
-    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> clusters;
-    euclideanClustering(ground_removed_cloud, clusters);
+    //   std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> clusters;
+    //  euclideanClustering(ground_removed_cloud, clusters);
 
     // // Xuất kết quả các bước xử lý qua các topic tương ứng
     // filtered_pub_.publish(convertToPointCloud2(filtered_cloud));
@@ -113,7 +131,7 @@ public:
     // Tạo cloud chứa các cụm vật thể
     pcl::PointCloud<pcl::PointXYZ>::Ptr safety_warn_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::PointCloud<pcl::PointXYZ>::Ptr safety_protect_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    computeSafetyZone(ground_removed_cloud, safety_warn_cloud, safety_protect_cloud);
+    computeSafetyZone(cloud_outliers_removed2, safety_warn_cloud, safety_protect_cloud);
 
     // Gửi thông tin vùng an toàn và trạng thái an toàn
     safety_warn_pub_.publish(convertToPointCloud2(safety_warn_cloud));
@@ -121,7 +139,7 @@ public:
 
     // Tính toán trạng thái an toàn
     std_msgs::String safety_status_msg;
-    safety_status_msg.data = computeSafetyStatus(ground_removed_cloud, safety_warn_cloud, safety_protect_cloud);
+    safety_status_msg.data = computeSafetyStatus(cloud_outliers_removed2, safety_warn_cloud, safety_protect_cloud);
 
     // Publish trạng thái an toàn
     safety_status_pub_.publish(safety_status_msg);
@@ -170,6 +188,31 @@ public:
     // Xuất kết quả các bước xử lý qua các topic tương ứng
 
     denoised_pub_.publish(convertToPointCloud2(cloud_out));
+  }
+  void conditionalOutlierRemoval(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
+                                 pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_out)
+  {
+    pcl::ConditionAnd<pcl::PointXYZ>::Ptr condition(new pcl::ConditionAnd<pcl::PointXYZ>());
+    condition->addComparison(pcl::FieldComparison<pcl::PointXYZ>::ConstPtr(
+        new pcl::FieldComparison<pcl::PointXYZ>("z", pcl::ComparisonOps::GT, condition_min_z_)));
+    condition->addComparison(pcl::FieldComparison<pcl::PointXYZ>::ConstPtr(
+        new pcl::FieldComparison<pcl::PointXYZ>("z", pcl::ComparisonOps::LT, condition_max_z_)));
+
+    pcl::ConditionalRemoval<pcl::PointXYZ> conditional_removal;
+    conditional_removal.setInputCloud(cloud_in);
+    conditional_removal.setCondition(condition);
+    conditional_removal.setKeepOrganized(true);
+    conditional_removal.filter(*cloud_out);
+  }
+
+  void radiusOutlierRemoval(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
+                            pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_out)
+  {
+    pcl::RadiusOutlierRemoval<pcl::PointXYZ> radius_removal;
+    radius_removal.setInputCloud(cloud_in);
+    radius_removal.setRadiusSearch(radius_search_);
+    radius_removal.setMinNeighborsInRadius(min_neighbors_in_radius_);
+    radius_removal.filter(*cloud_out);
   }
 
   void segmentGround(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
@@ -349,7 +392,7 @@ public:
   {
     sensor_msgs::PointCloud2 cloud_msg;
     pcl::toROSMsg(*cloud, cloud_msg);
-    cloud_msg.header.frame_id = "base_link";
+    cloud_msg.header.frame_id = "camera_link";
     return cloud_msg;
   }
 
@@ -384,13 +427,18 @@ private:
   double safety_protect_size_;
   Eigen::Vector3d safety_warn_position_;
   Eigen::Vector3d safety_protect_position_;
-  
+
   int min_cluster_warn_size_;
   int min_cluster_protect_size_;
   int min_consecutive_warn_count_;
   int min_consecutive_protect_count_;
   int consecutive_warn_count = 0;
   int consecutive_protect_count = 0;
+
+  double condition_min_z_;
+  double condition_max_z_;
+  double radius_search_;
+  int min_neighbors_in_radius_;
 
   void displayParameters()
   {
