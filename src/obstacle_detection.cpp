@@ -35,6 +35,8 @@ public:
     // Đăng ký các publisher
     filtered_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("filtered_publisher", 1);
     downsampled_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("downsampled_publisher", 1);
+    conditionalOR_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("radiusoutlierremovalpublisher", 1);
+    radiusOR_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("radiusoutlierremovalpublisher", 1);
     denoised_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("denoised_publisher", 1);
     obstacles_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("obstacles_publisher", 1);
     clustered_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("clustered_publisher", 1);
@@ -53,6 +55,11 @@ public:
     nh_.param<double>("pass_through_y_max", pass_through_y_max_, 1.0);
 
     nh_.param<double>("voxel_leaf_size", voxel_leaf_size_, 0.01);
+
+    nh_.param("condition_min_z", condition_min_z_, 0.0);
+    nh_.param("condition_max_z", condition_max_z_, 2.0);
+    nh_.param("radius_search", radius_search_, 0.05);
+    nh_.param("min_neighbors_in_radius", min_neighbors_in_radius_, 10);
 
     nh_.param<int>("ground_seg_max_iterations", ground_seg_max_iterations_, 50);
     nh_.param<double>("ground_seg_distance_threshold", ground_seg_distance_threshold_, 0.05);
@@ -75,10 +82,7 @@ public:
     nh_.param<int>("consecutive_warn_count", min_consecutive_warn_count_, 5);
     nh_.param<int>("consecutive_protect_count", min_consecutive_protect_count_, 5);
 
-    nh_.param("condition_min_z", condition_min_z_, 0.0);
-    nh_.param("condition_max_z", condition_max_z_, 2.0);
-    nh_.param("radius_search", radius_search_, 0.1);
-    nh_.param("min_neighbors_in_radius", min_neighbors_in_radius_, 5);
+
 
     displayParameters();
   }
@@ -102,11 +106,9 @@ public:
     // conditionalOutlierRemoval(downsampled_cloud, cloud_outliers_removed);
 
     // Remove outliers using Radius Outlier Removal
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_outliers_removed2(new pcl::PointCloud<pcl::PointXYZ>);
-    radiusOutlierRemoval(downsampled_cloud, cloud_outliers_removed2);
+    // pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_outliers_removed2(new pcl::PointCloud<pcl::PointXYZ>);
+    // radiusOutlierRemoval(downsampled_cloud, cloud_outliers_removed2);
 
-    //obstacles_pub_.publish(convertToPointCloud2(cloud_outliers_removed));
-    clustered_pub_.publish(convertToPointCloud2(cloud_outliers_removed2));
 
     // Apply StatisticalOutlierRemoval filter to remove outliers
     // pcl::PointCloud<pcl::PointXYZ>::Ptr denoised_cloud(new pcl::PointCloud<pcl::PointXYZ>);
@@ -131,7 +133,7 @@ public:
     // Tạo cloud chứa các cụm vật thể
     pcl::PointCloud<pcl::PointXYZ>::Ptr safety_warn_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::PointCloud<pcl::PointXYZ>::Ptr safety_protect_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-    computeSafetyZone(cloud_outliers_removed2, safety_warn_cloud, safety_protect_cloud);
+    computeSafetyZone(downsampled_cloud, safety_warn_cloud, safety_protect_cloud);
 
     // Gửi thông tin vùng an toàn và trạng thái an toàn
     safety_warn_pub_.publish(convertToPointCloud2(safety_warn_cloud));
@@ -139,7 +141,7 @@ public:
 
     // Tính toán trạng thái an toàn
     std_msgs::String safety_status_msg;
-    safety_status_msg.data = computeSafetyStatus(cloud_outliers_removed2, safety_warn_cloud, safety_protect_cloud);
+    safety_status_msg.data = computeSafetyStatus(downsampled_cloud, safety_warn_cloud, safety_protect_cloud);
 
     // Publish trạng thái an toàn
     safety_status_pub_.publish(safety_status_msg);
@@ -203,6 +205,8 @@ public:
     conditional_removal.setCondition(condition);
     conditional_removal.setKeepOrganized(true);
     conditional_removal.filter(*cloud_out);
+    conditionalOR_pub_.publish(convertToPointCloud2(cloud_out));
+    
   }
 
   void radiusOutlierRemoval(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
@@ -213,6 +217,7 @@ public:
     radius_removal.setRadiusSearch(radius_search_);
     radius_removal.setMinNeighborsInRadius(min_neighbors_in_radius_);
     radius_removal.filter(*cloud_out);
+    radiusOR_pub_.publish(convertToPointCloud2(cloud_out));
   }
 
   void segmentGround(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_in,
@@ -242,16 +247,6 @@ public:
       extract.setNegative(true);
       extract.filter(*cloud_out);
     }
-    //     for (const auto& point : *cloud_in)
-    // {
-    //     float distance = coefficients->values[0] * point.x +
-    //                      coefficients->values[1] * point.y +
-    //                      coefficients->values[2] * point.z +
-    //                      coefficients->values[3];
-    //     if (distance > 0.05) // Adjust the threshold according to your environment
-    //         cloud_out->push_back(point);
-    // }
-    // Xuất kết quả các bước xử lý qua các topic tương ứng
 
     obstacles_pub_.publish(convertToPointCloud2(cloud_out));
   }
@@ -347,8 +342,6 @@ public:
     int num_warn = safety_warn_cloud->size();
     int num_protect = safety_protect_cloud->size();
 
-    // static int consecutive_warn_count = 0;
-    // static int consecutive_protect_count = 0;
 
     std::string status = "Safe";
     if (num_warn >= min_cluster_warn_size_)
@@ -408,6 +401,8 @@ private:
   ros::Publisher safety_warn_pub_;
   ros::Publisher safety_protect_pub_;
   ros::Publisher safety_status_pub_;
+  ros::Publisher conditionalOR_pub_;
+  ros::Publisher radiusOR_pub_;
 
   double pass_through_z_min_;
   double pass_through_z_max_;
@@ -415,6 +410,12 @@ private:
   double pass_through_y_max_;
 
   double voxel_leaf_size_;
+
+  double condition_min_z_;
+  double condition_max_z_;
+  double radius_search_;
+  int min_neighbors_in_radius_;
+
 
   int ground_seg_max_iterations_;
   double ground_seg_distance_threshold_;
@@ -435,10 +436,6 @@ private:
   int consecutive_warn_count = 0;
   int consecutive_protect_count = 0;
 
-  double condition_min_z_;
-  double condition_max_z_;
-  double radius_search_;
-  int min_neighbors_in_radius_;
 
   void displayParameters()
   {
