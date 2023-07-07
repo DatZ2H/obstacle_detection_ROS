@@ -81,7 +81,7 @@
   <arg name="pass_through_y_min" default="-1.5" />
   <arg name="pass_through_y_max" default="0.25" />
   <arg name="pass_through_z_min" default="0.0" />
-  <arg name="pass_through_z_max" default="3.0" />
+  <arg name="pass_through_z_max" default="3.5" />
 
 
   <arg name="voxel_leaf_size" default="0.01" />
@@ -93,8 +93,8 @@
   <arg name="min_cluster_size" default="100" />
   <arg name="max_cluster_size" default="25000" />
 
-  <arg name="safety_warn_size" default="1.0" />
-  <arg name="safety_protect_size" default="0.5" />
+  <arg name="safety_warn_size" default="2.1" />
+  <arg name="safety_protect_size" default="1.6" />
   <arg name="safety_warn_position_x" default="0.0" />
   <arg name="safety_warn_position_y" default="0.0" />
   <arg name="safety_warn_position_z" default="0.0" />

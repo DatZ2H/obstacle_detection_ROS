@@ -71,8 +71,8 @@ public:
     nh_.param<int>("min_cluster_size", min_cluster_size_, 100);
     nh_.param<int>("max_cluster_size", max_cluster_size_, 25000);
 
-    nh_.param<double>("safety_warn_size", safety_warn_size_, 1.5);
-    nh_.param<double>("safety_protect_size", safety_protect_size_, 0.5);
+    nh_.param<double>("safety_warn_size", safety_warn_size_, 1.2);
+    nh_.param<double>("safety_protect_size", safety_protect_size_, 0.9);
     nh_.param<double>("safety_warn_position_x", safety_warn_position_(0), 0.0);
     nh_.param<double>("safety_warn_position_y", safety_warn_position_(1), 0.0);
     nh_.param<double>("safety_warn_position_z", safety_warn_position_(2), 0.0);
