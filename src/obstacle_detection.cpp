@@ -33,6 +33,7 @@ public:
   ObstacleDetection() : nh_("~")
   {
     // Đăng ký các publisher
+    raw_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("raw_publisher", 1);
     filtered_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("filtered_publisher", 1);
     downsampled_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("downsampled_publisher", 1);
     conditionalOR_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("radiusoutlierremoval_publisher", 1);
@@ -49,11 +50,13 @@ public:
     cloud_sub_ = nh_.subscribe("/camera/depth/color/points", 1, &ObstacleDetection::cloudCallback, this);
 
     // Đọc các tham số từ file launch hoặc sử dụng giá trị mặc định
-    nh_.param<double>("pass_through_z_min", pass_through_z_min_, 0.0);
-    nh_.param<double>("pass_through_z_max", pass_through_z_max_, 3.0);
+    nh_.param<double>("pass_through_x_min", pass_through_x_min_, -1.5);
+    nh_.param<double>("pass_through_x_max", pass_through_x_max_, 1.5);
     nh_.param<double>("pass_through_y_min", pass_through_y_min_, -1.5);
     nh_.param<double>("pass_through_y_max", pass_through_y_max_, 0.25);
-
+    nh_.param<double>("pass_through_z_min", pass_through_z_min_, 0.0);
+    nh_.param<double>("pass_through_z_max", pass_through_z_max_, 3.0);
+    
     nh_.param<double>("voxel_leaf_size", voxel_leaf_size_, 0.01);
 
     nh_.param("condition_min_z", condition_min_z_, 0.0);
@@ -79,8 +82,8 @@ public:
 
     nh_.param<int>("min_cluster_warn_size", min_cluster_warn_size_, 10);
     nh_.param<int>("min_cluster_protect_size", min_cluster_protect_size_, 10);
-    nh_.param<int>("consecutive_warn_count", min_consecutive_warn_count_, 5);
-    nh_.param<int>("consecutive_protect_count", min_consecutive_protect_count_, 5);
+    nh_.param<int>("min_consecutive_warn_count", min_consecutive_warn_count_, 5);
+    nh_.param<int>("min_consecutive_protect_count", min_consecutive_protect_count_, 5);
 
     displayParameters();
   }
@@ -90,6 +93,8 @@ public:
     // Chuyển đổi sensor_msgs/PointCloud2 thành pcl::PointCloud<pcl::PointXYZRGB>
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
     pcl::fromROSMsg(*cloud_msg, *cloud);
+
+    raw_pub_.publish(convertToPointCloud2(cloud));
 
     // Lọc dữ liệu theo trục z và y bằng PassThrough filter
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -147,103 +152,156 @@ public:
     // output_pub_.publish(convertToPointCloud2(clusters[0]));
   }
 
-  void passThroughFilter(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
-                         pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_out)
-  {
+ void passThroughFilter(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
+                       pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_out)
+{
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
-    pcl::PassThrough<pcl::PointXYZRGB> pass;
-    pass.setInputCloud(cloud_in);
+  // Lọc dữ liệu theo trục x
+  pcl::PassThrough<pcl::PointXYZRGB> pass_x;
+  pass_x.setInputCloud(cloud_in);
+  pass_x.setFilterFieldName("x");
+  pass_x.setFilterLimits(pass_through_x_min_, pass_through_x_max_);
+  pass_x.filter(*filtered_cloud);
 
-    // Filter along the x-axis
-    pass.setFilterFieldName("x");
-    pass.setFilterLimits(-1.5, 1.5);
-    pass.filter(*cloud_out);
+  // Lọc dữ liệu theo trục y
+  pcl::PassThrough<pcl::PointXYZRGB> pass_y;
+  pass_y.setInputCloud(filtered_cloud);
+  pass_y.setFilterFieldName("y");
+  pass_y.setFilterLimits(pass_through_y_min_, pass_through_y_max_);
+  pass_y.filter(*filtered_cloud);
 
-    // Filter along the y-axis
-    pass.setFilterFieldName("y");
-    pass.setFilterLimits(pass_through_y_min_, pass_through_y_max_);
-    pass.filter(*cloud_out);
+  // Lọc dữ liệu theo trục z
+  pcl::PassThrough<pcl::PointXYZRGB> pass_z;
+  pass_z.setInputCloud(filtered_cloud);
+  pass_z.setFilterFieldName("z");
+  pass_z.setFilterLimits(pass_through_z_min_, pass_through_z_max_);
+  pass_z.filter(*cloud_out);
 
-    // Filter along the z-axis
-    pass.setFilterFieldName("z");
-    pass.setFilterLimits(pass_through_z_min_, pass_through_z_max_);
-    pass.filter(*cloud_out);
+  // Xuất kết quả qua topic filtered_pub_
+  filtered_pub_.publish(convertToPointCloud2(cloud_out));
+}
 
-    // Xuất kết quả các bước xử lý qua các topic tương ứng
-    filtered_pub_.publish(convertToPointCloud2(cloud_out));
-  }
 
   void voxelGridFilter(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
                        pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_out)
   {
+    // Tạo một đối tượng VoxelGrid filter
     pcl::VoxelGrid<pcl::PointXYZRGB> voxel_grid;
+
+    // Thiết lập đầu vào cho bộ lọc VoxelGrid
     voxel_grid.setInputCloud(cloud_in);
+
+    // Thiết lập kích thước leaf (kích thước của voxel)
     voxel_grid.setLeafSize(voxel_leaf_size_, voxel_leaf_size_, voxel_leaf_size_);
+
+    // Áp dụng bộ lọc VoxelGrid
     voxel_grid.filter(*cloud_out);
-    // Xuất kết quả các bước xử lý qua các topic tương ứng
+
+    // Xuất kết quả qua topic downsampled_pub_
     downsampled_pub_.publish(convertToPointCloud2(cloud_out));
   }
+
   void statisticalOutlierRemoval(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
                                  pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_out)
   {
+    // Tạo một đối tượng StatisticalOutlierRemoval filter
     pcl::StatisticalOutlierRemoval<pcl::PointXYZRGB> sor;
-    sor.setInputCloud(cloud_in);
-    sor.setMeanK(50);            // Number of nearest neighbors to compute mean distance
-    sor.setStddevMulThresh(1.0); // Standard deviation multiplier threshold
-    sor.filter(*cloud_out);
-    // Xuất kết quả các bước xử lý qua các topic tương ứng
 
+    // Thiết lập đầu vào cho bộ lọc StatisticalOutlierRemoval
+    sor.setInputCloud(cloud_in);
+
+    // Thiết lập số lượng hàng xóm gần nhất để tính khoảng cách trung bình (mean distance)
+    sor.setMeanK(50);
+
+    // Thiết lập ngưỡng nhân chuẩn độ lệch tiêu chuẩn (standard deviation multiplier threshold)
+    sor.setStddevMulThresh(1.0);
+
+    // Áp dụng bộ lọc StatisticalOutlierRemoval
+    sor.filter(*cloud_out);
+
+    // Xuất kết quả qua topic denoised_pub_
     denoised_pub_.publish(convertToPointCloud2(cloud_out));
   }
+
   void conditionalOutlierRemoval(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
                                  pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_out)
   {
+    // Tạo một đối tượng ConditionAnd
     pcl::ConditionAnd<pcl::PointXYZRGB>::Ptr condition(new pcl::ConditionAnd<pcl::PointXYZRGB>());
+
+    // Thêm điều kiện so sánh cho trường z
     condition->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
         new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::GT, condition_min_z_)));
     condition->addComparison(pcl::FieldComparison<pcl::PointXYZRGB>::ConstPtr(
         new pcl::FieldComparison<pcl::PointXYZRGB>("z", pcl::ComparisonOps::LT, condition_max_z_)));
 
+    // Tạo một đối tượng ConditionalRemoval filter
     pcl::ConditionalRemoval<pcl::PointXYZRGB> conditional_removal;
+
+    // Thiết lập đầu vào cho bộ lọc ConditionalRemoval
     conditional_removal.setInputCloud(cloud_in);
+
+    // Thiết lập điều kiện cho bộ lọc ConditionalRemoval
     conditional_removal.setCondition(condition);
+
+    // Thiết lập cờ keepOrganized để giữ nguyên cấu trúc của điểm đám mây
     conditional_removal.setKeepOrganized(true);
+
+    // Áp dụng bộ lọc ConditionalRemoval
     conditional_removal.filter(*cloud_out);
+
+    // Xuất kết quả qua topic conditionalOR_pub_
     conditionalOR_pub_.publish(convertToPointCloud2(cloud_out));
   }
 
   void radiusOutlierRemoval(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
                             pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_out)
   {
+    // Tạo một đối tượng RadiusOutlierRemoval filter
     pcl::RadiusOutlierRemoval<pcl::PointXYZRGB> radius_removal;
+
+    // Thiết lập đầu vào cho bộ lọc RadiusOutlierRemoval
     radius_removal.setInputCloud(cloud_in);
+
+    // Thiết lập bán kính tìm kiếm
     radius_removal.setRadiusSearch(radius_search_);
+
+    // Thiết lập số lượng hàng xóm tối thiểu trong phạm vi bán kính
     radius_removal.setMinNeighborsInRadius(min_neighbors_in_radius_);
+
+    // Áp dụng bộ lọc RadiusOutlierRemoval
     radius_removal.filter(*cloud_out);
+
+    // Xuất kết quả qua topic radiusOR_pub_
     radiusOR_pub_.publish(convertToPointCloud2(cloud_out));
   }
 
   void segmentGround(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
                      pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_out)
   {
-    // Set the segmentation parameters
+    // Tạo một đối tượng SACSegmentation để phân đoạn mặt phẳng đất
     pcl::SACSegmentation<pcl::PointXYZRGB> seg;
+
+    // Thiết lập các tham số phân đoạn
     seg.setOptimizeCoefficients(true);
     seg.setModelType(pcl::SACMODEL_PLANE);
     seg.setMethodType(pcl::SAC_RANSAC);
     seg.setMaxIterations(ground_seg_max_iterations_);
     seg.setDistanceThreshold(ground_seg_distance_threshold_);
 
+    // Khai báo đối tượng ModelCoefficients và PointIndices để lưu trữ kết quả phân đoạn
     pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
     pcl::PointIndices::Ptr ground_indices(new pcl::PointIndices);
 
-    // Set the segmentation parameters
+    // Thiết lập đầu vào cho phân đoạn
     seg.setInputCloud(cloud_in);
     seg.segment(*ground_indices, *coefficients);
 
+    // Kiểm tra xem có điểm đất được phân đoạn hay không
     if (!ground_indices->indices.empty())
     {
-      // Extract the ground points
+      // Trích xuất các điểm không thuộc đất
       pcl::ExtractIndices<pcl::PointXYZRGB> extract;
       extract.setInputCloud(cloud_in);
       extract.setIndices(ground_indices);
@@ -251,16 +309,18 @@ public:
       extract.filter(*cloud_out);
     }
 
+    // Xuất kết quả qua topic obstacles_pub_
     obstacles_pub_.publish(convertToPointCloud2(cloud_out));
   }
 
   void euclideanClustering(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
                            std::vector<pcl::PointCloud<pcl::PointXYZRGB>::Ptr> &cloud_out)
   {
-    // Phân nhóm các điểm dữ liệu thành các cụm
+    // Tạo một đối tượng KdTree để tìm kiếm hàng xóm
     pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>);
     tree->setInputCloud(cloud_in);
 
+    // Tạo đối tượng EuclideanClusterExtraction để phân nhóm các cụm
     pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
     ec.setClusterTolerance(cluster_tolerance_);
     ec.setMinClusterSize(min_cluster_size_);
@@ -268,9 +328,11 @@ public:
     ec.setSearchMethod(tree);
     ec.setInputCloud(cloud_in);
 
+    // Khai báo vector lưu trữ chỉ số của các điểm thuộc cụm
     std::vector<pcl::PointIndices> cluster_indices;
     ec.extract(cluster_indices);
-    // Tạo cloud chứa các cụm vật thể
+
+    // Tạo các điểm đám mây cho từng cụm
     int cluster_label = 0;
     for (const auto &indices : cluster_indices)
     {
@@ -282,8 +344,8 @@ public:
       cluster->is_dense = true;
       cloud_out.push_back(cluster);
     }
-    cluster_label++;
 
+    // Xuất kết quả qua topic clustered_pub_
     clustered_pub_.publish(convertToPointCloud2(cloud_out[0]));
   }
 
@@ -328,6 +390,7 @@ public:
     pass.setInputCloud(filtered_protect_cloud);
     pass.filter(*safety_protect_cloud);
   }
+
   float calculateDistance(const pcl::PointXYZRGB &point)
   {
     float dx = point.x;
@@ -341,20 +404,16 @@ public:
                                   pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_warn_cloud,
                                   pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_protect_cloud)
   {
-
     int num_warn = safety_warn_cloud->size();
     int num_protect = safety_protect_cloud->size();
 
     std::string status = "Safe";
+
     if (num_warn >= min_cluster_warn_size_)
     {
-
       consecutive_warn_count++;
-      // consecutive_protect_count = 0;
-
       if (consecutive_warn_count >= min_consecutive_warn_count_)
       {
-        // ROS_WARN_STREAM("Safety zone breached! Proceed with caution.");
         status = "Warning";
       }
     }
@@ -365,13 +424,9 @@ public:
 
     if (num_protect >= min_cluster_protect_size_)
     {
-
       consecutive_protect_count++;
-      // consecutive_warn_count = 0;
-
       if (consecutive_protect_count >= min_consecutive_protect_count_)
       {
-        //  ROS_WARN_STREAM("Safety zone breached! Take immediate action!");
         status = "Protected";
       }
     }
@@ -394,6 +449,7 @@ public:
 private:
   ros::NodeHandle nh_;
   ros::Subscriber cloud_sub_;
+  ros::Publisher raw_pub_;
   ros::Publisher filtered_pub_;
   ros::Publisher downsampled_pub_;
   ros::Publisher denoised_pub_;
@@ -406,10 +462,12 @@ private:
   ros::Publisher conditionalOR_pub_;
   ros::Publisher radiusOR_pub_;
 
-  double pass_through_z_min_;
-  double pass_through_z_max_;
+  double pass_through_x_min_;
+  double pass_through_x_max_;
   double pass_through_y_min_;
   double pass_through_y_max_;
+  double pass_through_z_min_;
+  double pass_through_z_max_;
 
   double voxel_leaf_size_;
 
@@ -440,17 +498,33 @@ private:
   void displayParameters()
   {
     ROS_INFO("Obstacle Detection Parameters:");
+    ROS_INFO("pass_through_x_min: %f", pass_through_x_min_);
+    ROS_INFO("pass_through_x_max: %f", pass_through_x_max_);
+    ROS_INFO("pass_through_y_min: %f", pass_through_y_min_);
+    ROS_INFO("pass_through_y_max: %f", pass_through_y_max_);
     ROS_INFO("pass_through_z_min: %f", pass_through_z_min_);
     ROS_INFO("pass_through_z_max: %f", pass_through_z_max_);
+
     ROS_INFO("voxel_leaf_size: %f", voxel_leaf_size_);
+
+    ROS_INFO("ground_seg_max_iterations: %i", ground_seg_max_iterations_);
     ROS_INFO("ground_seg_distance_threshold: %f", ground_seg_distance_threshold_);
+
     ROS_INFO("cluster_tolerance: %f", cluster_tolerance_);
     ROS_INFO("min_cluster_size: %d", min_cluster_size_);
     ROS_INFO("max_cluster_size: %d", max_cluster_size_);
+
     ROS_INFO("safety_warn_size: %f", safety_warn_size_);
     ROS_INFO("safety_protect_size: %f", safety_protect_size_);
     ROS_INFO("safety_warn_position: [%f, %f, %f]", safety_warn_position_(0), safety_warn_position_(1), safety_warn_position_(2));
     ROS_INFO("safety_protect_position: [%f, %f, %f]", safety_protect_position_(0), safety_protect_position_(1), safety_protect_position_(2));
+
+    ROS_INFO("min_cluster_warn_size: %i", min_cluster_warn_size_);
+    ROS_INFO("min_cluster_protect_size: %i", min_cluster_protect_size_);
+    ROS_INFO("min_consecutive_warn_count: %i", min_consecutive_warn_count_);
+    ROS_INFO("min_consecutive_protect_count: %i", min_consecutive_protect_count_);
+
+
   }
 };
 

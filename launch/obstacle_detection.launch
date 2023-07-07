@@ -76,10 +76,13 @@
 
 
    <!-- Khai báo các tham số -->
-  <arg name="pass_through_z_min" default="0.0" />
-  <arg name="pass_through_z_max" default="3.0" />
+  <arg name="pass_through_x_min" default="-1.5" />
+  <arg name="pass_through_x_max" default="1.5" />
   <arg name="pass_through_y_min" default="-1.5" />
   <arg name="pass_through_y_max" default="0.25" />
+  <arg name="pass_through_z_min" default="0.0" />
+  <arg name="pass_through_z_max" default="3.0" />
+
 
   <arg name="voxel_leaf_size" default="0.01" />
 
@@ -101,8 +104,8 @@
 
   <arg name="min_cluster_warn_size" default="10" />
   <arg name="min_cluster_protect_size" default="10" />
-  <arg name="consecutive_warn_count" default="5" />
-  <arg name="consecutive_protect_count" default="5" />
+  <arg name="min_consecutive_warn_count" default="5" />
+  <arg name="min_consecutive_protect_count" default="5" />
 
   
   <group ns="$(arg camera)">
@@ -181,10 +184,12 @@
   </group>
   <node name="obstacle_detection_node" pkg="obstacle_detection" type="obstacle_detection" output="screen">
     <!-- Truyền các tham số vào node -->
-    <param name="pass_through_z_min" value="$(arg pass_through_z_min)" />
-    <param name="pass_through_z_max" value="$(arg pass_through_z_max)" />
+    <param name="pass_through_x_min" value="$(arg pass_through_x_min)" />
+    <param name="pass_through_x_max" value="$(arg pass_through_x_max)" />
     <param name="pass_through_y_min" value="$(arg pass_through_y_min)" />
     <param name="pass_through_y_max" value="$(arg pass_through_y_max)" />
+    <param name="pass_through_z_min" value="$(arg pass_through_z_min)" />
+    <param name="pass_through_z_max" value="$(arg pass_through_z_max)" />
 
     <param name="voxel_leaf_size" value="$(arg voxel_leaf_size)" />
 
@@ -206,8 +211,8 @@
 
     <param name="min_cluster_warn_size" value="$(arg min_cluster_warn_size)" />
     <param name="min_cluster_protect_size" value="$(arg min_cluster_protect_size)" />
-    <param name="consecutive_warn_count" value="$(arg consecutive_warn_count)" />
-    <param name="consecutive_protect_count" value="$(arg consecutive_protect_count)" />
+    <param name="min_consecutive_warn_count" value="$(arg min_consecutive_warn_count)" />
+    <param name="min_consecutive_protect_count" value="$(arg min_consecutive_protect_count)" />
 
   </node>
   <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="camera_base_tf" args="0.551 0 0.2 1.5708 -1.5708 0 base_link camera_link" /> -->
