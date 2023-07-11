@@ -22,11 +22,12 @@
 #include <pcl/common/transforms.h>
 #include <pcl/console/parse.h>
 #include <string>
+#include <std_msgs/Float32.h>
 #include <pcl/filters/conditional_removal.h>
 #include <pcl/common/distances.h>
 #include <pcl/filters/conditional_removal.h>
 #include <pcl/filters/radius_outlier_removal.h>
-
+#include <pcl/kdtree/kdtree_flann.h>
 class ObstacleDetection
 {
 public:
@@ -45,6 +46,7 @@ public:
     safety_warn_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("safety_warn_cloud", 1);
     safety_protect_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("safety_protect_cloud", 1);
     safety_status_pub_ = nh_.advertise<std_msgs::String>("safety_status", 1);
+    distance_pub_ = nh_.advertise<std_msgs::Float32>("distance_publisher", 1);
 
     // Đăng ký subscriber nhận dữ liệu từ topic /camera/depth/color/points
     cloud_sub_ = nh_.subscribe("/camera/depth/color/points", 1, &ObstacleDetection::cloudCallback, this);
@@ -147,6 +149,8 @@ public:
 
     // Publish trạng thái an toàn
     safety_status_pub_.publish(safety_status_msg);
+
+    computeDistanceZ(safety_warn_cloud,safety_protect_cloud);
 
     // Gửi kết quả xử lý của PCL qua topic output_point_cloud_topic
     // output_pub_.publish(convertToPointCloud2(clusters[0]));
@@ -437,6 +441,52 @@ public:
 
     return status;
   }
+  void computeDistanceZ(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_warn_cloud,
+                      const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_protect_cloud)
+{
+  pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
+  kdtree.setInputCloud(safety_warn_cloud);
+
+  std_msgs::Float32 distance_msg;
+
+  pcl::PointXYZRGB search_point;
+  search_point.x = 0.0;
+  search_point.y = 0.0;
+  search_point.z = 0.0;
+
+  std::vector<int> indices(1);
+  std::vector<float> squared_distances(1);
+
+  kdtree.nearestKSearch(search_point, 1, indices, squared_distances);
+
+  float distance_warn = std::sqrt(squared_distances[0]);
+
+  if (safety_protect_cloud->empty())
+  {
+    distance_msg.data = distance_warn;
+  }
+  else
+  {
+    pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree_protect;
+    kdtree_protect.setInputCloud(safety_protect_cloud);
+
+    kdtree_protect.nearestKSearch(search_point, 1, indices, squared_distances);
+
+    float distance_protect = std::sqrt(squared_distances[0]);
+
+    if (distance_protect < distance_warn)
+    {
+      distance_msg.data = distance_protect;
+    }
+    else
+    {
+      distance_msg.data = distance_warn;
+    }
+  }
+
+  distance_pub_.publish(distance_msg);
+}
+
 
   sensor_msgs::PointCloud2 convertToPointCloud2(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud)
   {
@@ -461,6 +511,7 @@ private:
   ros::Publisher safety_status_pub_;
   ros::Publisher conditionalOR_pub_;
   ros::Publisher radiusOR_pub_;
+  ros::Publisher distance_pub_;
 
   double pass_through_x_min_;
   double pass_through_x_max_;
