@@ -445,44 +445,55 @@ public:
   void computeDistanceZ(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_warn_cloud,
                       const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_protect_cloud)
 {
-  pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
-  kdtree.setInputCloud(safety_warn_cloud);
-
   std_msgs::Float32 distance_msg;
 
-  pcl::PointXYZRGB search_point;
-  search_point.x = 0.0;
-  search_point.y = 0.0;
-  search_point.z = 0.0;
-
-  std::vector<int> indices(1);
-  std::vector<float> squared_distances(1);
-
-  kdtree.nearestKSearch(search_point, 1, indices, squared_distances);
-
-  float distance_warn = std::sqrt(squared_distances[0]);
-
-  if (safety_protect_cloud->empty())
+  if (safety_warn_cloud->empty() && safety_protect_cloud->empty())
   {
-    distance_msg.data = distance_warn;
+    distance_msg.data = 0.0;
   }
   else
   {
-    pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree_protect;
-    kdtree_protect.setInputCloud(safety_protect_cloud);
+    double min_distance = std::numeric_limits<double>::max();
 
-    kdtree_protect.nearestKSearch(search_point, 1, indices, squared_distances);
-
-    float distance_protect = std::sqrt(squared_distances[0]);
-
-    if (distance_protect < distance_warn)
+    if (!safety_warn_cloud->empty())
     {
-      distance_msg.data = distance_protect;
+      pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
+      kdtree.setInputCloud(safety_warn_cloud);
+
+      pcl::PointXYZRGB search_point;
+      search_point.x = 0.0;
+      search_point.y = 0.0;
+      search_point.z = 0.0;
+
+      std::vector<int> indices(1);
+      std::vector<float> squared_distances(1);
+
+      kdtree.nearestKSearch(search_point, 1, indices, squared_distances);
+
+      double warn_distance = std::sqrt(squared_distances[0]);
+      min_distance = std::min(min_distance, warn_distance);
     }
-    else
+
+    if (!safety_protect_cloud->empty())
     {
-      distance_msg.data = distance_warn;
+      pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
+      kdtree.setInputCloud(safety_protect_cloud);
+
+      pcl::PointXYZRGB search_point;
+      search_point.x = 0.0;
+      search_point.y = 0.0;
+      search_point.z = 0.0;
+
+      std::vector<int> indices(1);
+      std::vector<float> squared_distances(1);
+
+      kdtree.nearestKSearch(search_point, 1, indices, squared_distances);
+
+      double protect_distance = std::sqrt(squared_distances[0]);
+      min_distance = std::min(min_distance, protect_distance);
     }
+
+    distance_msg.data = min_distance;
   }
 
   distance_pub_.publish(distance_msg);

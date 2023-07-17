@@ -52,9 +52,9 @@
   <arg name="pass_through_x_min" default="-1.5" />
   <arg name="pass_through_x_max" default="1.5" />
   <arg name="pass_through_y_min" default="-1.5" />
-  <arg name="pass_through_y_max" default="0.25" />
+  <arg name="pass_through_y_max" default="0.12" />
   <arg name="pass_through_z_min" default="0.0" />
-  <arg name="pass_through_z_max" default="3.5" />
+  <arg name="pass_through_z_max" default="4.0" />
 
 
   <arg name="voxel_leaf_size" default="0.01" />
@@ -166,7 +166,7 @@
 
   </node>
   <node pkg="tf2_ros" type="static_transform_publisher" name="camera_tf" args="0 0 0 0 0 0 base_camera camera_link" />
-  <node pkg="tf2_ros" type="static_transform_publisher" name="camera_base_tf" args="0 0 0 0 0 0 base_link base_camera" />
+  <node pkg="tf2_ros" type="static_transform_publisher" name="camera_base_tf" args="0.551 0 0.2 -1.5708 0 -1.5708 base_link base_camera" />
   <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="camera_base_tf" args="0.551 0 0.3 -1.5708 0 -1.5708 base_link base_camera" /> -->
 
 </launch>
