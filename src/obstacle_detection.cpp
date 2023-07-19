@@ -29,6 +29,8 @@
 #include <tf/transform_listener.h>
 #include <tf2_ros/static_transform_broadcaster.h>
 
+#include <obstacle_detection/fields_safety.h>
+
 class ObstacleDetection
 {
 public:
@@ -46,7 +48,7 @@ public:
     output_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("output_point_cloud_topic", 1);
     safety_warn_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("safety_warn_cloud", 1);
     safety_protect_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("safety_protect_cloud", 1);
-    safety_status_pub_ = nh_.advertise<std_msgs::String>("safety_status", 1);
+    safety_status_pub_ = nh_.advertise<obstacle_detection::fields_safety>("/obstacle_detection/safety_status", 1);
     distance_pub_ = nh_.advertise<std_msgs::Float32>("distance_publisher", 1);
 
     // Đăng ký subscriber nhận dữ liệu từ topic /camera/depth/color/points
@@ -59,7 +61,7 @@ public:
     nh_.param<double>("pass_through_y_max", pass_through_y_max_, 0.25);
     nh_.param<double>("pass_through_z_min", pass_through_z_min_, 0.0);
     nh_.param<double>("pass_through_z_max", pass_through_z_max_, 3.0);
-    
+
     nh_.param<double>("voxel_leaf_size", voxel_leaf_size_, 0.01);
 
     nh_.param("condition_min_z", condition_min_z_, 0.0);
@@ -145,48 +147,46 @@ public:
     safety_protect_pub_.publish(convertToPointCloud2(safety_protect_cloud));
 
     // Tính toán trạng thái an toàn
-    std_msgs::String safety_status_msg;
-    safety_status_msg.data = computeSafetyStatus(downsampled_cloud, safety_warn_cloud, safety_protect_cloud);
+    obstacle_detection::fields_safety safety_status = computeSafetyStatus(cloud, safety_warn_cloud, safety_protect_cloud);
 
     // Publish trạng thái an toàn
-    safety_status_pub_.publish(safety_status_msg);
+    safety_status_pub_.publish(safety_status);
 
-    computeDistanceZ(safety_warn_cloud,safety_protect_cloud);
+    computeDistanceZ(safety_warn_cloud, safety_protect_cloud);
 
     // Gửi kết quả xử lý của PCL qua topic output_point_cloud_topic
     // output_pub_.publish(convertToPointCloud2(clusters[0]));
   }
 
- void passThroughFilter(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
-                       pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_out)
-{
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+  void passThroughFilter(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
+                         pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_out)
+  {
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
-  // Lọc dữ liệu theo trục x
-  pcl::PassThrough<pcl::PointXYZRGB> pass_x;
-  pass_x.setInputCloud(cloud_in);
-  pass_x.setFilterFieldName("x");
-  pass_x.setFilterLimits(pass_through_x_min_, pass_through_x_max_);
-  pass_x.filter(*filtered_cloud);
+    // Lọc dữ liệu theo trục x
+    pcl::PassThrough<pcl::PointXYZRGB> pass_x;
+    pass_x.setInputCloud(cloud_in);
+    pass_x.setFilterFieldName("x");
+    pass_x.setFilterLimits(pass_through_x_min_, pass_through_x_max_);
+    pass_x.filter(*filtered_cloud);
 
-  // Lọc dữ liệu theo trục y
-  pcl::PassThrough<pcl::PointXYZRGB> pass_y;
-  pass_y.setInputCloud(filtered_cloud);
-  pass_y.setFilterFieldName("y");
-  pass_y.setFilterLimits(pass_through_y_min_, pass_through_y_max_);
-  pass_y.filter(*filtered_cloud);
+    // Lọc dữ liệu theo trục y
+    pcl::PassThrough<pcl::PointXYZRGB> pass_y;
+    pass_y.setInputCloud(filtered_cloud);
+    pass_y.setFilterFieldName("y");
+    pass_y.setFilterLimits(pass_through_y_min_, pass_through_y_max_);
+    pass_y.filter(*filtered_cloud);
 
-  // Lọc dữ liệu theo trục z
-  pcl::PassThrough<pcl::PointXYZRGB> pass_z;
-  pass_z.setInputCloud(filtered_cloud);
-  pass_z.setFilterFieldName("z");
-  pass_z.setFilterLimits(pass_through_z_min_, pass_through_z_max_);
-  pass_z.filter(*cloud_out);
+    // Lọc dữ liệu theo trục z
+    pcl::PassThrough<pcl::PointXYZRGB> pass_z;
+    pass_z.setInputCloud(filtered_cloud);
+    pass_z.setFilterFieldName("z");
+    pass_z.setFilterLimits(pass_through_z_min_, pass_through_z_max_);
+    pass_z.filter(*cloud_out);
 
-  // Xuất kết quả qua topic filtered_pub_
-  filtered_pub_.publish(convertToPointCloud2(cloud_out));
-}
-
+    // Xuất kết quả qua topic filtered_pub_
+    filtered_pub_.publish(convertToPointCloud2(cloud_out));
+  }
 
   void voxelGridFilter(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
                        pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_out)
@@ -405,100 +405,137 @@ public:
     return std::sqrt(dx * dx + dy * dy + dz * dz);
   }
 
-  std::string computeSafetyStatus(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
-                                  pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_warn_cloud,
-                                  pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_protect_cloud)
+  obstacle_detection::fields_safety computeSafetyStatus(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_in,
+                                                        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_warn_cloud,
+                                                        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_protect_cloud)
   {
-    int num_warn = safety_warn_cloud->size();
-    int num_protect = safety_protect_cloud->size();
+obstacle_detection::fields_safety safety_status;
+  safety_status.header.stamp = ros::Time::now();
 
-    std::string status = "Safe";
+  // Check if system is good and enabled
+  safety_status.system_good = true; // Assuming the system is good
+  safety_status.enable = true;      // Assuming the system is enabled
 
-    if (num_warn >= min_cluster_warn_size_)
-    {
-      consecutive_warn_count++;
-      if (consecutive_warn_count >= min_consecutive_warn_count_)
-      {
-        status = "Warning";
-      }
-    }
-    else
-    {
-      consecutive_warn_count = 0;
-    }
+  // Compute the number of points in the warn and protect clouds
+  int num_warn = safety_warn_cloud->size();
+  int num_protect = safety_protect_cloud->size();
 
-    if (num_protect >= min_cluster_protect_size_)
-    {
-      consecutive_protect_count++;
-      if (consecutive_protect_count >= min_consecutive_protect_count_)
-      {
-        status = "Protected";
-      }
-    }
-    else
-    {
-      consecutive_protect_count = 0;
-    }
+  // Set the safety fields based on the number of points
+  safety_status.fields.resize(4, false);  // Initialize all fields as false
 
-    return status;
+  // Thresholds for counting points
+  const int detect_threshold = 10;
+  const int warn_threshold = 50;
+  const int protect_threshold = 50;
+
+  static int nothing_count = 0;
+  static int detect_count = 0;
+  static int warn_count = 0;
+  static int protect_count = 0;
+
+  // Update counts based on the number of points in each cloud
+  if (num_protect >= protect_threshold)
+  {
+    protect_count++;
+    detect_count = warn_count = nothing_count = 0;
   }
-  void computeDistanceZ(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_warn_cloud,
-                      const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_protect_cloud)
-{
-  std_msgs::Float32 distance_msg;
-
-  if (safety_warn_cloud->empty() && safety_protect_cloud->empty())
+  else if (num_warn >= warn_threshold)
   {
-    distance_msg.data = 0.0;
+    warn_count++;
+    detect_count = protect_count = nothing_count = 0;
+  }
+  else if (num_warn >= detect_threshold || num_protect >= detect_threshold)
+  {
+    detect_count++;
+    warn_count = protect_count = nothing_count = 0;
   }
   else
   {
-    double min_distance = std::numeric_limits<double>::max();
-
-    if (!safety_warn_cloud->empty())
-    {
-      pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
-      kdtree.setInputCloud(safety_warn_cloud);
-
-      pcl::PointXYZRGB search_point;
-      search_point.x = 0.0;
-      search_point.y = 0.0;
-      search_point.z = 0.0;
-
-      std::vector<int> indices(1);
-      std::vector<float> squared_distances(1);
-
-      kdtree.nearestKSearch(search_point, 1, indices, squared_distances);
-
-      double warn_distance = std::sqrt(squared_distances[0]);
-      min_distance = std::min(min_distance, warn_distance);
-    }
-
-    if (!safety_protect_cloud->empty())
-    {
-      pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
-      kdtree.setInputCloud(safety_protect_cloud);
-
-      pcl::PointXYZRGB search_point;
-      search_point.x = 0.0;
-      search_point.y = 0.0;
-      search_point.z = 0.0;
-
-      std::vector<int> indices(1);
-      std::vector<float> squared_distances(1);
-
-      kdtree.nearestKSearch(search_point, 1, indices, squared_distances);
-
-      double protect_distance = std::sqrt(squared_distances[0]);
-      min_distance = std::min(min_distance, protect_distance);
-    }
-
-    distance_msg.data = min_distance;
+    nothing_count++;
+    detect_count = warn_count = protect_count = 0;
   }
 
-  distance_pub_.publish(distance_msg);
-}
 
+  // Update safety fields only when the consecutive counts reach the desired values
+  if (protect_count >= min_consecutive_protect_count_)
+  {
+    safety_status.fields[3] = true;  // Set "dangerous" field to true
+  }
+  if (warn_count >= min_consecutive_warn_count_)
+  {
+    safety_status.fields[2] = true;  // Set "warning" field to true
+  }
+  if (detect_count >= min_consecutive_warn_count_)
+  {
+    safety_status.fields[1] = true;  // Set "detect" field to true
+  }
+  if (nothing_count >= min_consecutive_warn_count_)
+  {
+    safety_status.fields[0] = true;  // Set "nothing" field to true
+  }
+  ROS_INFO("num_pro[%5d]-pro_co[%3d]-pro[%d]-num_warn[%5d]-warn_co[%3d]-warn[%d]-det_co[%3d]det[%d]-not_co[%3d]not[%d]",num_protect,protect_count,safety_status.fields[3],num_warn,warn_count,safety_status.fields[2],detect_count,safety_status.fields[1],nothing_count,safety_status.fields[0]);
+    // Publish the time of detection
+
+    safety_status.time_detect = ros::Time::now().toSec();
+
+    return safety_status;
+  }
+  void computeDistanceZ(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_warn_cloud,
+                        const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &safety_protect_cloud)
+  {
+    std_msgs::Float32 distance_msg;
+
+    if (safety_warn_cloud->empty() && safety_protect_cloud->empty())
+    {
+      distance_msg.data = 0.0;
+    }
+    else
+    {
+      double min_distance = std::numeric_limits<double>::max();
+
+      if (!safety_warn_cloud->empty())
+      {
+        pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
+        kdtree.setInputCloud(safety_warn_cloud);
+
+        pcl::PointXYZRGB search_point;
+        search_point.x = 0.0;
+        search_point.y = 0.0;
+        search_point.z = 0.0;
+
+        std::vector<int> indices(1);
+        std::vector<float> squared_distances(1);
+
+        kdtree.nearestKSearch(search_point, 1, indices, squared_distances);
+
+        double warn_distance = std::sqrt(squared_distances[0]);
+        min_distance = std::min(min_distance, warn_distance);
+      }
+
+      if (!safety_protect_cloud->empty())
+      {
+        pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
+        kdtree.setInputCloud(safety_protect_cloud);
+
+        pcl::PointXYZRGB search_point;
+        search_point.x = 0.0;
+        search_point.y = 0.0;
+        search_point.z = 0.0;
+
+        std::vector<int> indices(1);
+        std::vector<float> squared_distances(1);
+
+        kdtree.nearestKSearch(search_point, 1, indices, squared_distances);
+
+        double protect_distance = std::sqrt(squared_distances[0]);
+        min_distance = std::min(min_distance, protect_distance);
+      }
+
+      distance_msg.data = min_distance;
+    }
+
+    distance_pub_.publish(distance_msg);
+  }
 
   sensor_msgs::PointCloud2 convertToPointCloud2(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud)
   {
@@ -555,8 +592,20 @@ private:
   int min_cluster_protect_size_;
   int min_consecutive_warn_count_;
   int min_consecutive_protect_count_;
+
+
+  enum SafetyZone
+  {
+    NOTHING = 0,
+    DETECT,
+    WARNING,
+    DANGEROUS
+  };
+
+  int consecutive_detect_count = 0;
   int consecutive_warn_count = 0;
   int consecutive_protect_count = 0;
+  SafetyZone current_zone = NOTHING;
 
   void displayParameters()
   {
@@ -586,8 +635,6 @@ private:
     ROS_INFO("min_cluster_protect_size: %i", min_cluster_protect_size_);
     ROS_INFO("min_consecutive_warn_count: %i", min_consecutive_warn_count_);
     ROS_INFO("min_consecutive_protect_count: %i", min_consecutive_protect_count_);
-
-
   }
 };
 
