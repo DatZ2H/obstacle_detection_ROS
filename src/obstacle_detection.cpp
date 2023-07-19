@@ -432,48 +432,25 @@ obstacle_detection::fields_safety safety_status;
   static int detect_count = 0;
   static int warn_count = 0;
   static int protect_count = 0;
-
-  // Update counts based on the number of points in each cloud
-  if (num_protect >= protect_threshold)
-  {
+  if(num_protect>=min_cluster_protect_size_){
     protect_count++;
-    detect_count = warn_count = nothing_count = 0;
-  }
-  else if (num_warn >= warn_threshold)
-  {
-    warn_count++;
-    detect_count = protect_count = nothing_count = 0;
-  }
-  else if (num_warn >= detect_threshold || num_protect >= detect_threshold)
-  {
-    detect_count++;
-    warn_count = protect_count = nothing_count = 0;
-  }
-  else
-  {
-    nothing_count++;
-    detect_count = warn_count = protect_count = 0;
+    if(protect_count>=min_consecutive_protect_count_){
+    warn_count=0;
+      safety_status.fields[3] = true;
+    }
+  }else if(num_warn>=min_cluster_warn_size_){
+   warn_count++;
+    if(warn_count>=min_consecutive_warn_count_){
+      protect_count=0;
+      safety_status.fields[2] = true;
+    }
+  }else if(num_warn==0&num_protect==0){
+    safety_status.fields[0] = true;
+    warn_count=0;
+    protect_count=0;
   }
 
-
-  // Update safety fields only when the consecutive counts reach the desired values
-  if (protect_count >= min_consecutive_protect_count_)
-  {
-    safety_status.fields[3] = true;  // Set "dangerous" field to true
-  }
-  if (warn_count >= min_consecutive_warn_count_)
-  {
-    safety_status.fields[2] = true;  // Set "warning" field to true
-  }
-  if (detect_count >= min_consecutive_warn_count_)
-  {
-    safety_status.fields[1] = true;  // Set "detect" field to true
-  }
-  if (nothing_count >= min_consecutive_warn_count_)
-  {
-    safety_status.fields[0] = true;  // Set "nothing" field to true
-  }
-  ROS_INFO("num_pro[%5d]-pro_co[%3d]-pro[%d]-num_warn[%5d]-warn_co[%3d]-warn[%d]-det_co[%3d]det[%d]-not_co[%3d]not[%d]",num_protect,protect_count,safety_status.fields[3],num_warn,warn_count,safety_status.fields[2],detect_count,safety_status.fields[1],nothing_count,safety_status.fields[0]);
+  ROS_INFO("num_pro[%5d]-pro_co[%3d]-pro[%d]-num_warn[%5d]-warn_co[%3d]-warn[%d]-not_co[%3d]not[%d]",num_protect,protect_count,safety_status.fields[3],num_warn,warn_count,safety_status.fields[2],nothing_count,safety_status.fields[0]);
     // Publish the time of detection
 
     safety_status.time_detect = ros::Time::now().toSec();
