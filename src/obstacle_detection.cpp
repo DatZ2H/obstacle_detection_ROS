@@ -444,7 +444,8 @@ obstacle_detection::fields_safety safety_status;
       protect_count=0;
       safety_status.fields[2] = true;
     }
-  }else if(num_warn==0&num_protect==0){
+  }else //if(num_warn==0&num_protect==0)
+  {
     safety_status.fields[0] = true;
     warn_count=0;
     protect_count=0;

@@ -137,6 +137,7 @@
             <param name="enable_laser" value="$(arg enable_laser)"/>
             <param name="floor_height" value="$(arg floor_height)"/>
             <remap from="/$(arg camera_name)/depth_registered/points" to="/$(arg camera_name)/depth/color/points"/>
+            
         </node>
     </group>
      <node name="obstacle_detection_node" pkg="obstacle_detection" type="obstacle_detection" output="screen">
@@ -170,7 +171,7 @@
     <param name="min_cluster_protect_size" value="$(arg min_cluster_protect_size)" />
     <param name="min_consecutive_warn_count" value="$(arg min_consecutive_warn_count)" />
     <param name="min_consecutive_protect_count" value="$(arg min_consecutive_protect_count)" />
-
+    <remap from="/obstacle_detection/safety_status" to="/depth_camera/fields_safety"/>
   </node>
   <node pkg="tf2_ros" type="static_transform_publisher" name="camera_tf" args="0 0 0 0 0 0 base_camera camera_link" />
   <node pkg="tf2_ros" type="static_transform_publisher" name="camera_base_tf" args="0.551 0 0.22 -1.5708 0 -1.5708 base_link base_camera" />
